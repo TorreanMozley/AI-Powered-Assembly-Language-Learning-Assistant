@@ -2,6 +2,8 @@ import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
@@ -10,17 +12,16 @@ from google.genai import types
 app = FastAPI()
 
 
-# Allow the React development website to communicate
-# with this Python backend.
+# ============================================================
+# CORS
+# ============================================================
+
+# Allows the local React development server to communicate
+# with the local FastAPI backend.
 allowed_origins = [
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
-
-frontend_url = os.getenv("FRONTEND_URL")
-
-if frontend_url:
-    allowed_origins.append(frontend_url)
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,6 +31,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ============================================================
+# GEMINI SYSTEM INSTRUCTIONS
+# ============================================================
 
 SYSTEM_INSTRUCTIONS = """
 You are an intelligent, beginner-friendly college tutor.
@@ -128,6 +133,10 @@ Do not only provide an answer. Teach the student how the answer works.
 """
 
 
+# ============================================================
+# GEMINI CLIENT
+# ============================================================
+
 api_key = os.getenv("GEMINI_API_KEY")
 
 client = None
@@ -136,13 +145,23 @@ if api_key:
     client = genai.Client(api_key=api_key)
 
 
+# ============================================================
+# REQUEST MODEL
+# ============================================================
+
 class ChatRequest(BaseModel):
     message: str
 
 
-@app.get("/")
-def home():
-    return {"status": "Assembly AI backend is running"}
+# ============================================================
+# API ROUTES
+# ============================================================
+
+@app.get("/api/status")
+def status():
+    return {
+        "status": "Assembly AI backend is running"
+    }
 
 
 @app.post("/chat")
@@ -155,6 +174,7 @@ def chat(request: ChatRequest):
         )
 
     try:
+
         response = client.models.generate_content(
             model="gemini-3.5-flash",
             contents=request.message,
@@ -182,3 +202,67 @@ def chat(request: ChatRequest):
             status_code=500,
             detail=str(error)
         )
+
+
+# ============================================================
+# REACT FRONTEND
+# ============================================================
+
+# Render builds the React app into frontend/dist.
+# This finds that folder from backend/main.py.
+BASE_DIR = os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))
+)
+
+FRONTEND_DIST = os.path.join(
+    BASE_DIR,
+    "frontend",
+    "dist"
+)
+
+ASSETS_DIR = os.path.join(
+    FRONTEND_DIST,
+    "assets"
+)
+
+
+# Serve React's CSS, JavaScript, images, etc.
+if os.path.isdir(ASSETS_DIR):
+    app.mount(
+        "/assets",
+        StaticFiles(directory=ASSETS_DIR),
+        name="assets"
+    )
+
+
+# Serve the React website.
+@app.get("/{full_path:path}")
+def serve_react(full_path: str):
+
+    if not os.path.isdir(FRONTEND_DIST):
+        raise HTTPException(
+            status_code=404,
+            detail="React frontend has not been built."
+        )
+
+    requested_file = os.path.join(
+        FRONTEND_DIST,
+        full_path
+    )
+
+    # If React generated an actual file at this path,
+    # return that file.
+    if (
+        full_path
+        and os.path.isfile(requested_file)
+    ):
+        return FileResponse(requested_file)
+
+    # Otherwise return React's index.html.
+    # This also supports client-side routes.
+    return FileResponse(
+        os.path.join(
+            FRONTEND_DIST,
+            "index.html"
+        )
+    )

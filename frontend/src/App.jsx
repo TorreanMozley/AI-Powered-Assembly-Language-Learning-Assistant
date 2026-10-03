@@ -315,8 +315,14 @@ MIPS code:
 
     try {
 
+      // Local development uses the local FastAPI server.
+      // Production uses the same Render URL as the React website.
+      const API_URL = import.meta.env.PROD
+        ? ''
+        : 'http://127.0.0.1:8000'
+
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/chat`,
+        `${API_URL}/chat`,
         {
           method: 'POST',
 
